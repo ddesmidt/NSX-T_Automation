@@ -8,24 +8,24 @@
 This Python Script deletes the LS + LR + NSGroup + LB + DFW objects created by the script "Create_LS_LR_NSGroup_LB_DFW" 
 Topology :
 
-							+---------------+
-							|   Tier-0      |
-							| (not-deleted) |	
-							+---------------+
-							/              \
-						   /                \
-				-----------                  ------------
-			   /                                         \
-			+--------------+                            +--------------+
-			|   Tier-1     |                            |   Tier-1     |
-			|  (with LB)   |                            | (without LB) |
-			+--------------+ xN times                   +--------------+ xM times
-					|.1                                         |.1
-					|                                           |
+                            +---------------+
+                            |   Tier-0      |
+                            | (not-deleted) |    
+                            +---------------+
+                            /              \
+                           /                \
+                -----------                  ------------
+               /                                         \
+            +--------------+                            +--------------+
+            |   Tier-1     |                            |   Tier-1     |
+            |  (with LB)   |                            | (without LB) |
+            +--------------+ xN times                   +--------------+ xM times
+                    |.1                                         |.1
+                    |                                           |
   Logical-Switch    |  10.x.x.0 /24           Logical-Switch    |  10.x.x.0/24
 +------------------------------------|       +------------------------------------|
-			(DFW 1 Section + 1Rule)                      (DFW 1 Section + 1Rule)
-			(NSGroup=LS)                                 (NSGroup=LS)
+            (DFW 1 Section + 1Rule)                      (DFW 1 Section + 1Rule)
+            (NSGroup=LS)                                 (NSGroup=LS)
 
 
 
@@ -58,62 +58,62 @@ start_time= datetime.datetime.now()
 
 
 def nsxt_get_call (mgr, uri,cursor=''):
-	response = requests.get('https://'+mgr+uri+'?cursor='+cursor, verify=False, auth=(login, password), headers=headers, stream=True)
-	if "20" not in str(response.status_code):
-		print 'GET uri ' + uri + ' response status code: '+str(response.status_code)
-		print response.text
-	#As the answer is in JSON format, create the proper object
-	json_response=json.loads(response.text)
-	return json_response
-	
+    response = requests.get('https://'+mgr+uri+'?cursor='+cursor, verify=False, auth=(login, password), headers=headers, stream=True)
+    if "20" not in str(response.status_code):
+        print 'GET uri ' + uri + ' response status code: '+str(response.status_code)
+        print response.text
+    #As the answer is in JSON format, create the proper object
+    json_response=json.loads(response.text)
+    return json_response
+    
 def nsxt_find_call (mgr, uri, name):
-	json_response = nsxt_get_call (mgr, uri)
-	rerun = 'true'
-	object_list = []
-	# Create list of elements to find
-	while (rerun == 'true' and len(json_response['results']) > 0):
-		for result in (json_response['results']):
-			if name in result['display_name']:
-				object_list.append(result)
-		if ('cursor' in json_response):
-			json_response = nsxt_get_call (mgr, uri,cursor=json_response['cursor'])
-		else:
-			rerun = 'false'
-	return object_list
+    json_response = nsxt_get_call (mgr, uri)
+    rerun = 'true'
+    object_list = []
+    # Create list of elements to find
+    while (rerun == 'true' and len(json_response['results']) > 0):
+        for result in (json_response['results']):
+            if name in result['display_name']:
+                object_list.append(result)
+        if ('cursor' in json_response):
+            json_response = nsxt_get_call (mgr, uri,cursor=json_response['cursor'])
+        else:
+            rerun = 'false'
+    return object_list
 
 def nsxt_delete_call (mgr, uri_get, uri_delete, name, url_delete_option=''):
-	print 'Get the list of objects \"' + str(uri_get) + '\" to delete'
-	delete_list = nsxt_find_call (mgr, uri_get, name)
-	# Delete elements
-	for object in (delete_list):
-		response = requests.delete('https://'+mgr+uri_delete+object['id']+url_delete_option, verify=False, auth=(login, password), stream=True)
-		if "20" not in str(response.status_code):
-			print 'DELETE uri ' + uri + ' response status code: '+str(response.status_code)
-			print response.text
-		print '   delete : '+object['display_name']
-	return
+    print 'Get the list of objects \"' + str(uri_get) + '\" to delete'
+    delete_list = nsxt_find_call (mgr, uri_get, name)
+    # Delete elements
+    for object in (delete_list):
+        response = requests.delete('https://'+mgr+uri_delete+object['id']+url_delete_option, verify=False, auth=(login, password), stream=True)
+        if "20" not in str(response.status_code):
+            print 'DELETE uri ' + uri + ' response status code: '+str(response.status_code)
+            print response.text
+        print '   delete : '+object['display_name']
+    return
 
 
 def nsxt_delete_lr_ports__unplugged_call (mgr, lr_name):
-	t0 = nsxt_find_call (mgr, '/api/v1/logical-routers', lr_name)
-	t0_id = t0[0]['id']
-	
-	json_response = nsxt_get_call (mgr, '/api/v1/logical-router-ports')
-	rerun = 'true'
-	object_list = []
-	# Create list of elements to find
-	while (rerun == 'true' and len(json_response['results']) > 0):
-		for result in (json_response['results']):
-			if (t0_id == result['logical_router_id']) and ('linked_logical_router_port_id' not in result) and ('LogicalRouterLinkPortOnTIER0' == result['resource_type']):
-					response = requests.delete('https://'+mgr+'/api/v1/logical-router-ports/'+result['id'], verify=False, auth=(login, password), stream=True)
-					print '   delete Tier-0 linked ports to Tier-1'
-		if ('cursor' in json_response):
-			json_response = nsxt_get_call (mgr, uri,cursor=json_response['cursor'])
-		else:
-			rerun = 'false'
-	return
+    t0 = nsxt_find_call (mgr, '/api/v1/logical-routers', lr_name)
+    t0_id = t0[0]['id']
+    
+    json_response = nsxt_get_call (mgr, '/api/v1/logical-router-ports')
+    rerun = 'true'
+    object_list = []
+    # Create list of elements to find
+    while (rerun == 'true' and len(json_response['results']) > 0):
+        for result in (json_response['results']):
+            if (t0_id == result['logical_router_id']) and ('linked_logical_router_port_id' not in result) and ('LogicalRouterLinkPortOnTIER0' == result['resource_type']):
+                    response = requests.delete('https://'+mgr+'/api/v1/logical-router-ports/'+result['id'], verify=False, auth=(login, password), stream=True)
+                    print '   delete Tier-0 linked ports to Tier-1'
+        if ('cursor' in json_response):
+            json_response = nsxt_get_call (mgr, uri,cursor=json_response['cursor'])
+        else:
+            rerun = 'false'
+    return
 
-	
+    
 ######
 #GET TZ Overlay UUID
 ######
@@ -158,7 +158,7 @@ t0 = nsxt_delete_lr_ports__unplugged_call (manager_ip, t0_name)
 ###
 #Delete all LS Python
 nsxt_delete_call (manager_ip, '/api/v1/logical-switches', '/api/v1/logical-switches/', prefix_name+'_LS', url_delete_option='?detach=true&cascade=true')
-	
+    
 
 ###
 # Delete the DFW
