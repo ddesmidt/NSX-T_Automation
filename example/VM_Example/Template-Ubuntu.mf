@@ -1,2 +1,0 @@
-SHA256(Template-Ubuntu.ovf)= 655f4a1dca2709fb6ddeadf2e8cd50655663283b6d74ee48a611ca7bac61354e
-SHA256(Template-Ubuntu-1.vmdk)= 1a551410a433a788df18ae567e90b06caed4221fa9760162b02e3e26b3d2aaad
