@@ -1,0 +1,219 @@
+## NSX-T Clean of Demo App
+## Author: Dimitri Desmidt
+## version 1.0
+## April 2018
+
+###
+
+
+import requests
+import json
+import datetime
+from pyVmomi import vim
+from pyVim.connect import SmartConnect, Disconnect
+import vmutils
+import ssl
+import time
+
+
+# NSX-T information
+manager_ip="10.114.213.8"
+login="admin"
+password="VMware1!"
+tz_name="TZ-Overlay"
+edge_cluster_name="EdgeBM-ClusterAA(Dimi)"
+t0_name="Tier0-AA(EdgeBM_Dimi)"
+
+# vCenter information
+vcenter_ip="10.114.213.4"
+vcenter_user="administrator@vsphere.local"
+vcenter_pwd="VMware1!"
+cluster_name = 'Compute_Cluster'
+clone_vmsource = 'Template-Ubuntu1604-ESXi'
+datacenter_name = 'DC1'
+datastore_name = 'NFS_DG'
+
+prefix_name = "Python"
+
+######################################################################################################
+# Don't change things below
+######################################################################################################
+
+start_time= datetime.datetime.now()
+
+#remove the self certificate warnings
+requests.packages.urllib3.disable_warnings()
+
+# headers for NSX-T Restful API calls
+headers = {'Content-type': 'application/json', 'Accept': 'application/json'}
+
+# vCenter accept self-signed certs
+s = ssl.SSLContext(ssl.PROTOCOL_TLSv1)
+s.verify_mode = ssl.CERT_NONE
+
+def nsxt_get_call (mgr, uri):
+    response = requests.get('https://'+mgr+uri, verify=False, auth=(login, password), headers=headers, stream=True)
+    if "20" not in str(response.status_code):
+        print "GET uri " + uri + " response status code: "+str(response.status_code)
+        print response.text
+    #As the answer is in JSON format, create the proper object
+    json_response=json.loads(response.text)
+    return json_response
+    
+def nsxt_find_all_call (mgr, uri, name):
+    json_response = nsxt_get_call (mgr, uri)
+    rerun = 'true'
+    object_list = []
+    # Create list of elements to find
+    while (rerun == 'true' and len(json_response['results']) > 0):
+        for result in (json_response['results']):
+            # I look for objects with prefix_name contained in the object name
+            if name in result['display_name']:
+                object_list.append(result)
+        if ('cursor' in json_response):
+            json_response = nsxt_get_call (mgr, uri,cursor=json_response['cursor'])
+        else:
+            rerun = 'false'
+    return object_list
+
+def nsxt_delete_call (mgr, uri_get, uri_delete, name, url_delete_option=''):
+    print 'Get the list of objects \"' + str(uri_get) + '\" to delete'
+    delete_list = nsxt_find_all_call (mgr, uri_get, name)
+    # Delete elements
+    for object in (delete_list):
+        response = requests.delete('https://'+mgr+uri_delete+object['id']+url_delete_option, verify=False, auth=(login, password), stream=True)
+        if "20" not in str(response.status_code):
+            print 'DELETE uri ' + uri_get + ' response status code: '+str(response.status_code)
+            print response.text
+        print '   Delete : '+object['display_name']
+    return
+
+
+def nsxt_delete_lr_ports__unplugged_call (mgr, lr_name):
+    t0 = nsxt_find_all_call (mgr, '/api/v1/logical-routers', lr_name)
+    t0_id = t0[0]['id']
+    
+    json_response = nsxt_get_call (mgr, '/api/v1/logical-router-ports')
+    rerun = 'true'
+    object_list = []
+    # Create list of elements to find
+    while (rerun == 'true' and len(json_response['results']) > 0):
+        for result in (json_response['results']):
+            if (t0_id == result['logical_router_id']) and ('linked_logical_router_port_id' not in result) and ('LogicalRouterLinkPortOnTIER0' == result['resource_type']):
+                    response = requests.delete('https://'+mgr+'/api/v1/logical-router-ports/'+result['id'], verify=False, auth=(login, password), stream=True)
+                    print '   delete Tier-0 linked ports to Tier-1'
+        if ('cursor' in json_response):
+            json_response = nsxt_get_call (mgr, uri,cursor=json_response['cursor'])
+        else:
+            rerun = 'false'
+    return
+
+
+def vCenter_wait_for_task(task):
+    while True:
+        if task.info.state == vim.TaskInfo.State.success:
+            return
+        if task.info.state == vim.TaskInfo.State.error:
+            raise Exception('task failed')
+        time.sleep(1)
+        
+
+def vCenter_get_objlist(content, vimtype, prefix_name):
+    object_list = []
+    # Create list of elements to find
+    container = content.viewManager.CreateContainerView(content.rootFolder, vimtype, True)
+    for c in container.view:
+        if prefix_name in c.name:
+            object_list.append(c)
+    return object_list
+
+
+def vCenter_get_obj(content, vimtype, name):
+    obj = None
+    container = content.viewManager.CreateContainerView(content.rootFolder, vimtype, True)
+    for c in container.view:
+        if c.name == name:
+            obj = c
+            break
+    return obj
+
+    
+######
+#Connect to vCenter
+######
+vcenter = SmartConnect(host=vcenter_ip, user=vcenter_user, pwd=vcenter_pwd, sslContext=s)
+content = vcenter.RetrieveContent()
+
+	
+######
+#Delete VMs
+######
+list_vm = vCenter_get_objlist(content, [vim.VirtualMachine], prefix_name)
+print "VMs to delete"
+for vm in list_vm:
+   print "   Delete VM "+ vm.name
+   task = vm.PowerOffVM_Task()
+   vCenter_wait_for_task(task)
+   task = vm.Destroy_Task()
+   vCenter_wait_for_task(task)
+    
+######
+#GET TZ Overlay UUID
+######
+tz = nsxt_find_all_call (manager_ip, '/api/v1/transport-zones', tz_name)
+tz_id = tz[0]['id']
+#print "TZ_id = "+tz_id
+
+######
+#DELETE Network and Security objects
+###
+# Delete the LB_VS + LB_Pool + NSGroup + LBS
+###
+#Delete all LBS 
+nsxt_delete_call (manager_ip, '/api/v1/loadbalancer/services', '/api/v1/loadbalancer/services/', prefix_name+'_LB')
+
+#Delete all LB_VS 
+nsxt_delete_call (manager_ip, '/api/v1/loadbalancer/virtual-servers', '/api/v1/loadbalancer/virtual-servers/', prefix_name+'_VS')
+
+#Delete all LB_Pool 
+nsxt_delete_call (manager_ip, '/api/v1/loadbalancer/pools', '/api/v1/loadbalancer/pools/', prefix_name+'_Pool')
+
+#Delete all LB_Monitor
+nsxt_delete_call (manager_ip, '/api/v1/loadbalancer/monitors', '/api/v1/loadbalancer/monitors/', prefix_name+'_Monitor')
+
+#Delete all NSGroup 
+nsxt_delete_call (manager_ip, '/api/v1/ns-groups', '/api/v1/ns-groups/', prefix_name+'_NSGroup', url_delete_option='?force=true')
+
+
+
+###
+# Delete the LR
+###
+#Delete all LR
+nsxt_delete_call (manager_ip, '/api/v1/logical-routers', '/api/v1/logical-routers/', prefix_name+'_LR', url_delete_option='?force=true')
+#Delete Tier0 LR Ports unattached
+t0 = nsxt_delete_lr_ports__unplugged_call (manager_ip, t0_name)
+
+
+###
+# Delete the LS
+###
+#Delete all LS 
+nsxt_delete_call (manager_ip, '/api/v1/logical-switches', '/api/v1/logical-switches/', prefix_name+'_LS', url_delete_option='?detach=true&cascade=true')
+#Delete all LS-Profile
+nsxt_delete_call (manager_ip, '/api/v1/switching-profiles', '/api/v1/switching-profiles/', prefix_name+'_SW_Profile')
+
+
+###
+# Delete the DFW
+###
+#Delete all DFW Section 
+nsxt_delete_call (manager_ip, '/api/v1/firewall/sections', '/api/v1/firewall/sections/', prefix_name+'_Section', url_delete_option='?cascade=true')
+
+
+end_time= datetime.datetime.now()
+
+print 'script started at ' + start_time.strftime("%Y-%m-%d %H:%M:%S")
+print 'script ended at ' + end_time.strftime("%Y-%m-%d %H:%M:%S")
+total_time = end_time - start_time
+print 'total time '+str(total_time).split(".")[0]
