@@ -18,7 +18,7 @@ Topology:
             +--------------+
                     |.1
                     |
-  LS-PlaneSpotter   |  10.1.1.0 /24
+  Python-LS         |  10.1.1.0 /24
 +------------------------------------|
        |        |            (DFW 1 Section + Rules)
     VM-Web1  VM-Web2         (NSGroups Web)
